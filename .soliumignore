@@ -1,2 +1,4 @@
 node_modules
 contracts/test
+contracts/lib/DVote.sol
+contracts/lib/ProvethVerifier.sol

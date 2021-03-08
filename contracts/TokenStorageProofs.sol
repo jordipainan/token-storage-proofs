@@ -3,6 +3,8 @@ pragma solidity ^0.7.1;
 
 import "./lib/RLP.sol";
 import "./lib/TrieProofs.sol";
+import "./lib/DVote.sol";
+import "./lib/ProvethVerifier.sol";
 
 
 contract TokenStorageProofs {
@@ -53,7 +55,8 @@ contract TokenStorageProofs {
         address holder,
         uint256 blockNumber,
         bytes memory storageProof,
-        uint256 balanceMappingPosition
+        uint256 balanceMappingPosition,
+        uint256 lib
     )
         external view returns (uint256)
     {
@@ -63,7 +66,17 @@ contract TokenStorageProofs {
         // The path for a storage value is the hash of its slot
         bytes32 slot = getBalanceSlot(holder, balanceMappingPosition);
         bytes32 proofPath = keccak256(abi.encodePacked(slot));
-        return storageProof.verify(root, proofPath).toRLPItem().toUint();
+
+        bytes memory value;
+        if (lib == 0) {
+            value = storageProof.verify(root, proofPath);
+        } else if (lib == 1) {
+            value = DVote.verify(storageProof, root, proofPath);
+        } else {
+            value = ProvethVerifier.validateMPTProof(root, _decodePath(proofPath), storageProof.toRLPItem().toList());
+        }
+
+        return value.toRLPItem().toUint();
     }
 
     function getBalanceSlot(address holder, uint256 balanceMappingPosition) public pure returns (bytes32) {
@@ -78,5 +91,11 @@ contract TokenStorageProofs {
         require(keccak256(blockHeaderRLP) == blockHash, ERROR_INVALID_BLOCK_HEADER);
         // 0x7b = 0x20 (length) + 0x5b (position of state root in header, [91, 123])
         assembly { stateRoot := mload(add(blockHeaderRLP, 0x7b)) }
+    }
+
+    function _decodePath(bytes32 path) private pure returns (bytes memory) {
+        bytes memory decodedPath = new bytes(32);
+        assembly { mstore(add(decodedPath, 0x20), path) }
+        return ProvethVerifier.decodeNibbles(decodedPath, 0);
     }
 }
