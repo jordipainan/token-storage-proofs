@@ -9,17 +9,17 @@ contract('TokenStorageProofs', ([holder]) => {
 
   const BALANCE_MAPPING_SLOT = '1'
 
-  beforeEach('setup addresses', async () => {
+  before('setup addresses', async () => {
     otherHolder = (await web3.eth.accounts.create()).address
     noHolder = (await web3.eth.accounts.create()).address
   })
 
-  beforeEach('deploy contracts', async () => {
+  before('deploy contracts', async () => {
     tokenStorageProofs = await TokenStorageProofs.new()
     token = await ERC20.new()
   })
 
-  beforeEach('process storage roots', async () => {
+  before('process storage roots', async () => {
     await token.mint(holder, 1000)
 
     mintBlockNumber = await web3.eth.getBlockNumber()
