@@ -1,8 +1,8 @@
 {
   "name": "token-storage-proofs",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Token storage proofs",
-  "author": "Facu Spagnuolo<facundo_spagnuolo@icloud.com>",
+  "author": "Facu Spagnuolo<facundo_spagnuolo@icloud.com>, Jordi Pinyana<jpainan@vocdoni.io>",
   "license": "MIT",
   "scripts": {
     "lint": "solium --dir ./contracts",
@@ -23,6 +23,7 @@
     "hardhat": "^2.0.7",
     "merkle-patricia-tree": "^2.3.2",
     "rlp": "^2.1.0",
-    "solium": "^1.2.5"
+    "solium": "^1.2.5",
+    "util": "^0.12.3"
   }
 }

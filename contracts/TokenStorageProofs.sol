@@ -2,13 +2,14 @@
 pragma solidity ^0.7.1;
 
 import "./lib/RLP.sol";
-import "./lib/TrieProofs.sol";
-
+import "./lib/TrieProof.sol";
+import "./lib/ContractSupport.sol";
+import "./lib/IERC20.sol";
 
 contract TokenStorageProofs {
     using RLP for bytes;
     using RLP for RLP.RLPItem;
-    using TrieProofs for bytes;
+    using TrieProof for bytes;
 
     uint8 private constant ACCOUNT_STORAGE_ROOT_INDEX = 2;
 
@@ -16,58 +17,113 @@ contract TokenStorageProofs {
     string private constant ERROR_INVALID_BLOCK_HEADER = "INVALID_BLOCK_HEADER";
     string private constant ERROR_UNPROCESSED_STORAGE_ROOT = "UNPROCESSED_STORAGE_ROOT";
 
-    // Proven storage root for account at block number
-    mapping (address => mapping (uint256 => bytes32)) public storageRoot;
+    event TokenRegistered(address indexed token, address indexed registrar);
 
-    event AccountSateProofProcessed(address indexed account, uint256 blockNumber, bytes32 storageRoot);
+    struct ERC20Token {
+        uint256 balanceMappingPosition;
+        bool registered;
+    }
+
+    // proven storage root for account at block number
+    mapping(address => ERC20Token) public tokens;
+    address[] public tokenAddresses;
+    uint32 public tokenCount = 0;
+
+    function isRegistered(address ercTokenAddress) public view returns (bool) {
+        require(ercTokenAddress != address(0x0), "Invalid address");
+        return tokens[ercTokenAddress].registered;
+    }
+
+    function registerToken(
+        address token,
+        uint256 blockNumber,
+        bytes memory storageProof,
+        bytes memory blockHeaderRLP,
+        bytes memory accountStateProof,
+        uint256 balanceMappingPosition
+    ) public {
+        // Check that the address is a contract
+        require(
+            ContractSupport.isContract(token),
+            "The address must be a contract"
+        );
+        // check token is not registered
+        require(!isRegistered(token), "Token already registered");
+
+        // check msg.sender balance calling 'balanceOf' function on the ERC20 contract
+        IERC20 tokenContract = IERC20(token);
+        uint256 balance = tokenContract.balanceOf(msg.sender);
+        require(balance > 0, "Insufficient funds");
+
+        bytes32 root = processStorageRoot(token, blockNumber, blockHeaderRLP, accountStateProof);
+
+        uint256 balanceFromTrie = getBalance(
+            msg.sender,
+            storageProof,
+            root,
+            balanceMappingPosition
+        );
+        require(balanceFromTrie > 0, "Insufficient funds");
+
+        ERC20Token storage newToken = tokens[token];
+        newToken.registered = true;
+        newToken.balanceMappingPosition = balanceMappingPosition;
+        tokenAddresses.push(token);
+        tokenCount = tokenCount + 1;
+
+        emit TokenRegistered(token, msg.sender);
+    }
 
     function processStorageRoot(
-        address account,
+        address token,
         uint256 blockNumber,
         bytes memory blockHeaderRLP,
         bytes memory accountStateProof
     )
-        external
+        internal view returns (bytes32 accountStorageRoot)
     {
         bytes32 blockHash = blockhash(blockNumber);
         // Before Constantinople only the most recent 256 block hashes are available
         require(blockHash != bytes32(0), ERROR_BLOCKHASH_NOT_AVAILABLE);
 
         // The path for an account in the state trie is the hash of its address
-        bytes32 proofPath = keccak256(abi.encodePacked(account));
+        bytes32 accountProofPath = keccak256(abi.encodePacked(token));
 
         // Get the account state from a merkle proof in the state trie. Returns an RLP encoded bytes array
         bytes32 stateRoot = _getStateRoot(blockHeaderRLP, blockHash);
-        bytes memory accountRLP = accountStateProof.verify(stateRoot, proofPath);
+        bytes memory accountRLP = accountStateProof.verify(stateRoot, accountProofPath);
 
         // Extract the storage root from the account node and convert to bytes32
-        bytes32 accountStorageRoot = bytes32(accountRLP.toRLPItem().toList()[ACCOUNT_STORAGE_ROOT_INDEX].toUint());
-
-        // Cache the storage root in storage as processing is expensive
-        storageRoot[account][blockNumber] = accountStorageRoot;
-        emit AccountSateProofProcessed(account, blockNumber, accountStorageRoot);
+        accountStorageRoot = bytes32(accountRLP.toRLPItem().toList()[ACCOUNT_STORAGE_ROOT_INDEX].toUint());
     }
 
     function getBalance(
-        address token,
         address holder,
-        uint256 blockNumber,
         bytes memory storageProof,
+        bytes32 root,
         uint256 balanceMappingPosition
     )
-        external view returns (uint256)
+        internal pure returns (uint256)
     {
-        bytes32 root = storageRoot[token][blockNumber];
         require(root != bytes32(0), ERROR_UNPROCESSED_STORAGE_ROOT);
-
         // The path for a storage value is the hash of its slot
         bytes32 slot = getBalanceSlot(holder, balanceMappingPosition);
-        bytes32 proofPath = keccak256(abi.encodePacked(slot));
-        return storageProof.verify(root, proofPath).toRLPItem().toUint();
+        bytes32 storageProofPath = keccak256(abi.encodePacked(slot));
+
+        bytes memory value;
+        value = TrieProof.verify(storageProof, root, storageProofPath);
+
+        return value.toRLPItem().toUint();
     }
 
     function getBalanceSlot(address holder, uint256 balanceMappingPosition) public pure returns (bytes32) {
         return keccak256(abi.encodePacked(bytes32(uint256(holder)), balanceMappingPosition));
+    }
+
+
+    function getBalanceMappingPosition(address ercTokenAddress) public view returns (uint256) {
+        require(ercTokenAddress != address(0x0), "Invalid address");
+        return tokens[ercTokenAddress].balanceMappingPosition;
     }
 
     /**
